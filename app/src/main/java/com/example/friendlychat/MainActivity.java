@@ -1,4 +1,7 @@
+
 package com.example.friendlychat;
+        import androidx.annotation.NonNull;
+        import androidx.annotation.Nullable;
         import androidx.appcompat.app.AppCompatActivity;
         import android.os.Bundle;
         import android.text.Editable;
@@ -13,13 +16,34 @@ package com.example.friendlychat;
         import android.widget.ImageButton;
         import android.widget.ListView;
         import android.widget.ProgressBar;
+        import android.widget.Toast;
+
+        import com.firebase.ui.auth.AuthUI;
+        import com.google.firebase.auth.FirebaseAuth;
+        import com.google.firebase.auth.FirebaseUser;
+        import com.google.firebase.database.ChildEventListener;
+        import com.google.firebase.database.DataSnapshot;
+        import com.google.firebase.database.DatabaseError;
+        import com.google.firebase.database.DatabaseReference;
+        import com.google.firebase.database.FirebaseDatabase;
 
         import java.util.ArrayList;
+        import java.util.Arrays;
         import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
+
+    private FirebaseDatabase mFirebaseDatabase;
+    private DatabaseReference mFirebaseDatabaseReference;
+    private ChildEventListener mChildEventListner;
+
+    private FirebaseAuth mFirebaseAuth;
+    public static final int RC_SIGN_IN=1;//this flag var for Firebase UI auth
+
+    //It will help ti know user state thta he is login or not and do different things at  each time
+    private FirebaseAuth.AuthStateListener mAuthStateListener;
 
     public static final String ANONYMOUS = "anonymous";
     public static final int DEFAULT_MSG_LENGTH_LIMIT = 1000;
@@ -30,7 +54,6 @@ public class MainActivity extends AppCompatActivity {
     private ImageButton mPhotoPickerButton;
     private EditText mMessageEditText;
     private Button mSendButton;
-
     private String mUsername;
 
     @Override
@@ -39,6 +62,11 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         mUsername = ANONYMOUS;
+
+
+        mFirebaseDatabase=FirebaseDatabase.getInstance();
+        mFirebaseAuth=FirebaseAuth.getInstance();
+        mFirebaseDatabaseReference=mFirebaseDatabase.getReference().child("messages");
 
         // Initialize references to views
         mProgressBar = findViewById(R.id.progressBar);
@@ -85,11 +113,44 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View view) {
                 // TODO: Send messages on click
+                //Creating a instace of FriendlyMessage Class to store Message Data in Friendly Message Variable
+                //passing text as message , mUsername as username , photoUrl as null for now
+                FriendlyMessage friendlyMessage = new FriendlyMessage
+                        (mMessageEditText.getText().toString(), mUsername, null);
+                //this it to pass a values to the messgae database of our app
+                mFirebaseDatabaseReference.push().setValue(friendlyMessage);
 
                 // Clear input box
                 mMessageEditText.setText("");
             }
         });
+
+        mAuthStateListener=new FirebaseAuth.AuthStateListener() {
+            @Override
+            public void onAuthStateChanged( FirebaseAuth firebaseAuth) {
+                FirebaseUser user=firebaseAuth.getCurrentUser();
+                if(user !=null){
+                    //when signed in
+                    onSignedoutInInitialize(user.getDisplayName());
+                    Toast.makeText(MainActivity.this, "Signed in", Toast.LENGTH_SHORT).show();
+
+                }else{
+                    //when signed out
+                    onSignedOutCleanup();
+                    //Firebase Ui auth
+                    startActivityForResult(
+                            AuthUI.getInstance()
+                                    .createSignInIntentBuilder()
+                                    .setIsSmartLockEnabled(false)
+                                    .setAvailableProviders(Arrays.asList(
+                                            new AuthUI.IdpConfig.GoogleBuilder().build(),
+                                            new AuthUI.IdpConfig.EmailBuilder().build() ))
+                                    .build(),
+                            RC_SIGN_IN);
+                }
+
+            }
+        };
     }
 
     @Override
@@ -103,4 +164,59 @@ public class MainActivity extends AppCompatActivity {
     public boolean onOptionsItemSelected(MenuItem item) {
         return super.onOptionsItemSelected(item);
     }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        mFirebaseAuth.addAuthStateListener(mAuthStateListener);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        mFirebaseAuth.removeAuthStateListener(mAuthStateListener);
+        mMessageAdapter.clear();
+        detachDatabaseReasListener();
+    }
+    private void onSignedoutInInitialize(String username){
+        mUsername=username;
+        attachDatabaseReasListener();
+    }
+    private void onSignedOutCleanup(){
+        mUsername=ANONYMOUS;
+        mMessageAdapter.clear();
+        detachDatabaseReasListener();
+
+    }
+    private void attachDatabaseReasListener(){
+        if(mChildEventListner == null){
+        mChildEventListner=new ChildEventListener() {
+            @Override
+            public void onChildAdded( DataSnapshot snapshot,  String previousChildName) {
+                //this function autumaticly called when new child is added or for fitrst time for every child present
+
+                //we are fetching data in friendly message class as data is stored in that way
+                FriendlyMessage friendlyMessage=snapshot.getValue(FriendlyMessage.class);
+
+                //we have set it to the custom adaptor created for listview
+                mMessageAdapter.add(friendlyMessage);
+
+            }
+
+            @Override
+            public void onChildChanged( DataSnapshot snapshot, String previousChildName) { }
+            @Override
+            public void onChildRemoved(DataSnapshot snapshot) { }
+            @Override
+            public void onChildMoved( DataSnapshot snapshot,  String previousChildName) { }
+            @Override
+            public void onCancelled( DatabaseError error) { }
+        };
+        mFirebaseDatabaseReference.addChildEventListener(mChildEventListner);}
+    }
+    private void detachDatabaseReasListener(){
+        if(mChildEventListner != null){
+        mFirebaseDatabaseReference.removeEventListener(mChildEventListner);
+        mChildEventListner=null;
+    }}
 }
